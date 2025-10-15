@@ -668,6 +668,14 @@ def main() -> None:
         logging.error(f"Binary '{binary_path}' not found")
         sys.exit(1)
     
+    # ASCII art logo
+    print("""
+██████   ██████  ██████  ███████ ██████   █████  ████████ ██  ██████  ███    ██ 
+██   ██ ██    ██ ██   ██ ██      ██   ██ ██   ██    ██    ██ ██    ██ ████   ██ 
+██████  ██    ██ ██████  █████   ██████  ███████    ██    ██ ██    ██ ██ ██  ██ 
+██   ██ ██    ██ ██      ██      ██   ██ ██   ██    ██    ██ ██    ██ ██  ██ ██ 
+██   ██  ██████  ██      ███████ ██   ██ ██   ██    ██    ██  ██████  ██   ████ 
+""")
     print("## AI-AUGMENTED GADGET ANALYZER")
     print("="*70)
     print(f"## Binary: {binary_path}")

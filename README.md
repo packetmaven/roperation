@@ -1,4 +1,19 @@
+```
+██████   ██████  ██████  ███████ ██████   █████  ████████ ██  ██████  ███    ██ 
+██   ██ ██    ██ ██   ██ ██      ██   ██ ██   ██    ██    ██ ██    ██ ████   ██ 
+██████  ██    ██ ██████  █████   ██████  ███████    ██    ██ ██    ██ ██ ██  ██ 
+██   ██ ██    ██ ██      ██      ██   ██ ██   ██    ██    ██ ██    ██ ██  ██ ██ 
+██   ██  ██████  ██      ███████ ██   ██ ██   ██    ██    ██  ██████  ██   ████ 
+```
+
 # ROPeration: AI-Augmented Code-Reuse Gadget Analyzer
+
+**Multi-Architecture Binary Exploitation Research Framework**
+
+![Version](https://img.shields.io/badge/version-2.0.0-blue)
+![Python](https://img.shields.io/badge/python-3.11+-green)
+![License](https://img.shields.io/badge/license-GPL--3.0-red)
+![Architectures](https://img.shields.io/badge/architectures-14%20variants-orange)
 
 ---
 
