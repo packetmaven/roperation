@@ -455,24 +455,24 @@ python3.11 roperation.py --binary target.bin --generate-yara
 **Algorithm:**
 ```python
 1. Architecture Detection
-   ?????? Parse binary headers (ELF/PE/Mach-O)
-   ?????? Extract machine type and class
-   ?????? Map to Capstone architecture constants
+   ## Parse binary headers (ELF/PE/Mach-O)
+   ## Extract machine type and class
+   ## Map to Capstone architecture constants
 
 2. Binary Loading
-   ?????? Read entire file into memory
-   ?????? Identify code sections (.text, .plt, etc.)
+   ## Read entire file into memory
+   ## Identify code sections (.text, .plt, etc.)
 
 3. Disassembly
-   ?????? Initialize Capstone with detected architecture
-   ?????? Enable skipdata mode (continue through non-code)
-   ?????? Enable detail mode (full operand information)
-   ?????? Linear sweep from base address (0x400000 default)
+   ## Initialize Capstone with detected architecture
+   ## Enable skipdata mode (continue through non-code)
+   ## Enable detail mode (full operand information)
+   ## Linear sweep from base address (0x400000 default)
 
 4. Instruction Filtering
-   ?????? Validate executable semantics
-   ?????? Remove data section false positives
-   ?????? Build instruction sequence database
+   ## Validate executable semantics
+   ## Remove data section false positives
+   ## Build instruction sequence database
 ```
 
 ### Gadget Extraction
@@ -506,17 +506,17 @@ For each instruction I in disassembly:
 **Feature Engineering:**
 ```python
 1. Mnemonic Sequence Vectorization
-   ?????? TF-IDF with n-grams (1,2)
-   ?????? Creates sparse feature matrix
+   ## TF-IDF with n-grams (1,2)
+   ## Creates sparse feature matrix
    
 2. Similarity Computation
-   ?????? Cosine similarity in TF-IDF space
-   ?????? Groups functionally similar gadgets
+   ## Cosine similarity in TF-IDF space
+   ## Groups functionally similar gadgets
 
 3. Cluster Assignment
-   ?????? eps=0.3 (similarity threshold)
-   ?????? min_samples=2 (minimum cluster size)
-   ?????? Noise labeled as cluster_id=-1
+   ## eps=0.3 (similarity threshold)
+   ## min_samples=2 (minimum cluster size)
+   ## Noise labeled as cluster_id=-1
 ```
 
 **Benefits:**
@@ -531,21 +531,21 @@ For each instruction I in disassembly:
 **Process:**
 ```python
 1. Project Initialization
-   ?????? Try standard loader (auto_load_libs=False)
-   ?????? Fallback to blob loader for non-standard formats
+   ## Try standard loader (auto_load_libs=False)
+   ## Fallback to blob loader for non-standard formats
 
 2. CFG Generation
-   ?????? CFGFast analysis (fast, approximation-based)
-   ?????? Identifies reachable code blocks
+   ## CFGFast analysis (fast, approximation-based)
+   ## Identifies reachable code blocks
 
 3. Reachability Analysis
-   ?????? Count CFG nodes
-   ?????? Validate gadget addresses are in CFG
+   ## Count CFG nodes
+   ## Validate gadget addresses are in CFG
 
 4. Taint Tracking (Optional)
-   ?????? Mark attacker-controlled memory regions
-   ?????? Trace data flow to syscall arguments
-   ?????? Identify DOP gadgets
+   ## Mark attacker-controlled memory regions
+   ## Trace data flow to syscall arguments
+   ## Identify DOP gadgets
 ```
 
 **Purpose:**
@@ -836,7 +836,7 @@ ERROR: Binary 'target.bin' not found
 
 **Symptoms:**
 ```
-??????  ML ranking requested but transformers not available
+##  ML ranking requested but transformers not available
 ```
 
 **Solution:**
@@ -1059,11 +1059,23 @@ black roperation.py --check
 
 ## License
 
-**Educational and Authorized Research Use Only**
+This project is licensed under the **GNU General Public License v3.0** - see the [LICENSE](LICENSE) file for details.
 
-This software is provided for educational and authorized security research purposes. Users must obtain explicit permission before analyzing binaries they do not own or have authorization to test. The authors and contributors disclaim all liability for misuse.
+### Summary
 
-See LICENSE file for complete terms.
+- ✅ Freedom to use, study, share, and modify the software
+- ✅ Source code must remain open under GPL-3.0
+- ✅ Modified versions must be clearly marked as changed
+- ⚠️  No warranty provided - use at your own risk
+
+### Security Research Ethics
+
+This software is intended for authorized security research and educational purposes only. Users must:
+- Obtain explicit permission before analyzing binaries they do not own
+- Comply with all applicable laws and regulations
+- Use responsibly and ethically
+
+The authors and contributors disclaim all liability for misuse of this tool.
 
 ---
 
