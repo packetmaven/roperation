@@ -1,17 +1,23 @@
 #!/usr/bin/env python3
 """
-AI-Augmented ROP/JOP/COOP/DOP Gadget Analyzer
+ROP/JOP/COOP/DOP Gadget Analyzer
 
-Features:
+Classical static-analysis core (implemented and relied upon):
 - Multi-format: ELF, PE, Mach-O with auto-detection
-- Multi-architecture: x86_64, x86, ARM, ARM64
-- Advanced gadget types: ROP, JOP, COOP, DOP, hybrid patterns
-- AI/ML ranking: CodeBERT-based usefulness scoring
-- SMT chain synthesis: Automated exploit chain generation
-- Symbolic validation: angr with blob loader fallback
-- Constraint filtering: Bad-byte avoidance, register requirements
-- Neural clustering: DBSCAN for gadget families
-- Comprehensive reporting: JSON/console output
+- Multi-architecture: x86_64/x86 (tested); arm, arm64, mips, ppc, riscv (classic-ISA
+  code paths; arm64 has NO PAC/BTI modeling and is experimental)
+- Typed gadget extraction: ROP, JOP, COOP, DOP
+- Heuristic usefulness scoring (primary ranking signal)
+- Gadget-family clustering: TF-IDF + DBSCAN (classical ML, not neural)
+- YARA rule generation and JSON/console reporting
+
+Experimental research layers (NOT production-grade; see per-function notes):
+- CodeBERT embedding-based scoring: UNTRAINED complexity proxy (embedding L2 norm),
+  not a learned exploitability model. The heuristic score is the real signal.
+- Chain synthesis: greedy register-control search for simple x86-64 execve chains.
+  Despite the function name synthesize_chain_z3, there is NO Z3/SMT solving here yet.
+- angr integration: returns a CFG node count as a coarse liveness signal only;
+  it does NOT prove per-gadget reachability.
 """
 
 import argparse
@@ -28,7 +34,8 @@ import numpy as np
 from sklearn.cluster import DBSCAN
 from sklearn.feature_extraction.text import TfidfVectorizer
 
-# Optional advanced imports
+# Optional Z3 import - reserved for a planned SMT synthesis backend; NOT used by the
+# current heuristic synthesizer below
 try:
     import z3
     Z3_AVAILABLE = True
@@ -208,7 +215,9 @@ BAD_BYTES = {0x00, 0x0A, 0x0D, 0x20}  # null, LF, CR, space - common shellcode c
 
 def heuristic_score(gadget: Dict) -> int:
     """
-    Calculate advanced heuristic usefulness score for gadget (2025 enhanced).
+    Calculate a hand-weighted heuristic usefulness score for a gadget.
+
+    This transparent heuristic is the PRIMARY ranking signal used by the tool.
     
     Scoring factors:
     - Stack manipulation (pop > push for ROP chains)
@@ -285,7 +294,15 @@ def heuristic_score(gadget: Dict) -> int:
 # Optional CodeBERT ML ranking
 # ----------------------------------------------------------------------
 class CodeBERTScorer:
-    """CodeBERT-based gadget usefulness scorer using embeddings."""
+    """Experimental CodeBERT embedding-based scorer.
+
+    NOTE: This is NOT trained on exploitability. It runs the gadget's mnemonic
+    sequence through off-the-shelf codebert-base, mean-pools the final hidden
+    state, and returns the embedding's L2 norm as a coarse complexity proxy.
+    Embedding magnitude is a weak stand-in for gadget usefulness; prefer
+    heuristic_score() as the real signal. A supervised version (fine-tuned on
+    whether a gadget contributed to a working chain) is the intended direction.
+    """
     
     def __init__(self, model_name: str = "microsoft/codebert-base"):
         if not ML_AVAILABLE:
@@ -300,12 +317,15 @@ class CodeBERTScorer:
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
         self.model = AutoModel.from_pretrained(model_name)
         self.model.eval()
-        logging.info("CodeBERT scorer initialized")
+        logging.info("CodeBERT embedding scorer initialized (experimental, untrained proxy)")
 
     def score(self, gadget: Dict) -> float:
         """
-        Score gadget usefulness using CodeBERT embeddings.
-        Higher embedding norm = more complex/useful gadget.
+        Return an experimental complexity proxy for a gadget.
+
+        Method: mean-pool codebert-base last_hidden_state, take its L2 norm,
+        normalize to [0, 1]. This is an UNVALIDATED heuristic proxy, not a
+        learned or calibrated measure of exploitability.
         """
         seq = " ".join(f"{i['mnemonic']} {i['op_str']}" for i in gadget["instructions"])
         inputs = self.tokenizer(seq, return_tensors="pt", truncation=True, max_length=512)
@@ -353,7 +373,7 @@ def filter_by_constraints(gadgets: List[Dict], required_regs: List[str] = None, 
 # Clustering (TF-IDF + DBSCAN)
 # ----------------------------------------------------------------------
 def cluster_gadgets(gadgets: List[Dict]) -> None:
-    """Cluster gadgets by semantic similarity."""
+    """Cluster gadgets into families via TF-IDF + DBSCAN (classical ML, not neural)."""
     if not gadgets:
         return
     corpus = [";".join(i["mnemonic"] for i in g["instructions"]) for g in gadgets]
@@ -366,7 +386,13 @@ def cluster_gadgets(gadgets: List[Dict]) -> None:
 # Symbolic verification (angr with blob fallback)
 # ----------------------------------------------------------------------
 def symbolic_verify(binary_path: str, arch_key: str) -> int:
-    """Validate gadget reachability using angr."""
+    """Return a coarse CFG liveness signal via angr (NOT reachability validation).
+
+    Builds a CFGFast and returns the CFG node count. This does NOT verify that
+    individual gadget addresses lie on reachable paths; it is only a coarse
+    "is this binary analyzable / how much live code" signal. True per-gadget
+    reachability validation is planned, not implemented.
+    """
     try:
         import angr
         # Suppress angr warnings
@@ -393,7 +419,7 @@ def symbolic_verify(binary_path: str, arch_key: str) -> int:
         cfg = proj.analyses.CFGFast()
         return len(cfg.graph.nodes())
     except Exception as e:
-        logging.debug(f"Symbolic validation unavailable: {str(e)[:60]}")
+        logging.debug(f"angr CFG liveness signal unavailable: {str(e)[:60]}")
         return 0
 
 # ----------------------------------------------------------------------
@@ -413,7 +439,7 @@ def report(arch: str, gadgets_by_type: Dict[str, List[Dict]], cfg_nodes: int, li
     for kind, lst in gadgets_by_type.items():
         print(f"   {kind:<6}: {len(lst)} gadgets")
     if cfg_nodes > 0:
-        print(f"   Symbolic CFG nodes: {cfg_nodes}")
+        print(f"   CFG nodes (liveness signal): {cfg_nodes}")
     
     # Determine how many to show (0 = all)
     rop_limit = len(gadgets_by_type.get("ROP", [])) if limit == 0 else limit
@@ -450,13 +476,20 @@ def report(arch: str, gadgets_by_type: Dict[str, List[Dict]], cfg_nodes: int, li
             seq = " ; ".join(f"{i['mnemonic']} {i['op_str']}" for i in g["instructions"])
             print(f"   {g['start_address']}: {seq[:65]}")
     
-    print("\n## Analysis complete - gadget discovery with AI/ML ranking")
+    print("\n## Analysis complete - gadget discovery (heuristic ranking; ML score experimental)")
 
 def synthesize_chain_z3(gadgets: List[Dict], target: str = "execve") -> List[Dict]:
     """
-    Heuristic-based ROP chain synthesis for x86-64.
-    
-    Note: Named for potential Z3 integration, currently uses heuristic search.
+    Heuristic ROP chain synthesis for x86-64 (EXPERIMENTAL).
+
+    IMPORTANT: The name is aspirational. There is NO Z3/SMT solving in this path.
+    This is a greedy first-match search: for each syscall-argument register it
+    takes the first gadget that appears to modify it. It does NOT model stack
+    layout, propagate bad bytes across the chain, or account for a later gadget
+    clobbering a register set by an earlier one. For real constraint-solved
+    chains, use a solver-backed builder such as angrop. A genuine SMT backend
+    (encoding each gadget's register/memory effects and solving for a valid
+    ordering under bad-byte and clobber constraints) is the planned direction.
     
     For execve: Searches for gadgets to set up syscall registers:
     - rax = 59 (execve syscall number)
@@ -565,7 +598,7 @@ def generate_yara_rule(gadgets_by_type: Dict[str, List[Dict]], binary_name: str)
     rule = f'''rule ROP_Gadgets_{binary_name.replace(".", "_")} {{
     meta:
         description = "Auto-generated ROP gadget signatures"
-        generated = "AI-Augmented Gadget Analyzer"
+        generated = "ROPeration Gadget Analyzer"
         gadget_count = "{len(patterns)}"
     
     strings:'''
@@ -593,7 +626,7 @@ def dump_json(output_path: Path, data: Dict) -> None:
 # ----------------------------------------------------------------------
 def main() -> None:
     parser = argparse.ArgumentParser(
-        description="AI-Augmented Gadget Analyzer",
+        description="ROPeration - ROP/JOP/COOP/DOP gadget analyzer (heuristic core; experimental ML/synthesis layers)",
         epilog="Example: python3.11 roperation_enhanced.py --binary split --ml-rank"
     )
     parser.add_argument(
@@ -604,7 +637,7 @@ def main() -> None:
     parser.add_argument(
         "--ml-rank",
         action="store_true",
-        help="Enable CodeBERT-based ML ranking (requires transformers)"
+        help="Enable experimental CodeBERT embedding-based scoring (untrained proxy; requires transformers)"
     )
     parser.add_argument(
         "--required-regs",
@@ -639,7 +672,7 @@ def main() -> None:
         "--synthesize-chain",
         type=str,
         choices=['execve'],
-        help="Synthesize ROP chain for target (e.g., execve)"
+        help="Experimental: greedy (non-SMT) register-control chain search for target (x86-64 execve)"
     )
     
     parser.add_argument(
@@ -711,7 +744,7 @@ def main() -> None:
         if not ML_AVAILABLE:
             print("##  ML ranking requested but transformers not available")
         else:
-            print("???? Running CodeBERT ML ranking...")
+            print("## Running experimental CodeBERT embedding scoring (untrained proxy)...")
             try:
                 scorer = CodeBERTScorer()
                 for g in rop + jop + coop + dop:
@@ -734,8 +767,8 @@ def main() -> None:
     for lst in filtered.values():
         cluster_gadgets(lst)
     
-    # 8. Symbolic verification
-    print("## Symbolic validation...")
+    # 8. angr CFG liveness signal (NOT reachability validation)
+    print("## Computing angr CFG liveness signal...")
     cfg_nodes = symbolic_verify(str(binary_path), arch_key)
     
     # 9. Reporting
@@ -752,7 +785,7 @@ def main() -> None:
     }
     dump_json(Path(args.output), output_data)
     
-    # 11. SMT Chain Synthesis (optional)
+    # 11. Experimental heuristic chain synthesis (greedy, non-SMT; optional)
     if args.synthesize_chain:
         print(f"\n## Synthesizing ROP chain for {args.synthesize_chain}...")
         # Use all ROP gadgets (before filtering)
