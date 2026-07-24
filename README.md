@@ -13,7 +13,7 @@
 
 ## Abstract
 
-ROPeration implements a framework for discovering, classifying, and synthesizing code-reuse attack gadgets across multiple binary formats and processor architectures. The tool combines classical static analysis techniques with modern machine learning approaches, including transformer-based semantic embeddings, neural clustering, and constraint-solving for automated exploit chain generation. This research tool enables systematic analysis of binary executables to identify Return-Oriented Programming (ROP), Jump-Oriented Programming (JOP), Counterfeit Object-Oriented Programming (COOP), and Data-Oriented Programming (DOP) attack primitives, providing both offensive security researchers and defensive analysts with actionable intelligence for understanding and mitigating code-reuse vulnerabilities.
+ROPeration implements a framework for discovering, classifying, and synthesizing code-reuse attack gadgets across multiple binary formats and processor architectures. The tool combines a classical static-analysis core (multi-architecture disassembly, typed gadget extraction, heuristic scoring, TF-IDF/DBSCAN clustering) with two experimental research layers: a CodeBERT embedding-based scorer (an untrained complexity proxy, not a learned exploitability model) and a heuristic chain synthesizer (greedy register-control search; an SMT/Z3 backend is planned, not yet implemented). This research tool enables systematic analysis of binary executables to identify Return-Oriented Programming (ROP), Jump-Oriented Programming (JOP), Counterfeit Object-Oriented Programming (COOP), and Data-Oriented Programming (DOP) attack primitives, providing both offensive security researchers and defensive analysts with actionable intelligence for understanding and mitigating code-reuse vulnerabilities.
 
 ---
 
@@ -44,12 +44,12 @@ ROPeration implements a framework for discovering, classifying, and synthesizing
 ROPeration addresses three fundamental challenges in modern exploit development and detection:
 
 1. **Automated Gadget Discovery**: Systematic enumeration of exploitable code sequences across diverse binary formats and architectures
-2. **Semantic Classification**: AI-driven categorization of gadgets by tactical utility and exploitation potential
-3. **Chain Synthesis**: Constraint-based automated generation of exploit chains for specific attack objectives
+2. **Gadget Triage**: Heuristic usefulness scoring, plus an experimental CodeBERT embedding-based score (complexity proxy; not trained on exploitability labels)
+3. **Chain Synthesis (experimental)**: Greedy register-control search for simple x86-64 execve chains; a constraint-solving (SMT/Z3) backend is planned, not yet implemented
 
 ### Key Capabilities
 
-**Multi-Architecture Support (14 Variants):**
+**Multi-Architecture Support (10 architecture configurations):**
 - x86 (32-bit), x86-64 (64-bit)
 - ARM (32-bit), ARM64 (AArch64)
 - MIPS (32/64-bit, big-endian)
@@ -69,13 +69,13 @@ ROPeration addresses three fundamental challenges in modern exploit development 
 - **DOP**: Data-oriented programming (memory read/write without control flow)
 
 **Features:**
-- CodeBERT transformer-based ML ranking
-- Heuristic scoring with 12 evaluation criteria
-- SMT-based automated chain synthesis
+- Heuristic gadget scoring (12 evaluation criteria) — the primary ranking signal
+- CodeBERT embedding-based scoring (experimental; untrained complexity proxy, not a learned exploitability model)
+- Heuristic chain synthesis for simple x86-64 execve chains (greedy register-control search; SMT/Z3 backend planned, not implemented)
 - YARA rule generation for defensive use
 - Constraint-based filtering (registers, bad bytes)
-- Neural clustering (DBSCAN)
-- Symbolic execution validation (angr)
+- TF-IDF + DBSCAN clustering for gadget-family deduplication
+- angr CFG liveness signal (node-count heuristic; not per-gadget reachability proof)
 
 ---
 
@@ -333,7 +333,9 @@ call qword ptr [rax + 0x10] ??? Virtual method call
 
 ---
 
-### 4. CodeBERT ML Ranking
+### 4. CodeBERT Embedding-Based Scoring (Experimental)
+
+> **Status / honesty note:** This layer is **not trained**. It runs the gadget's mnemonic sequence through off-the-shelf `codebert-base`, mean-pools the final hidden state, and uses the embedding's L2 norm as a coarse complexity proxy. Embedding magnitude is a weak stand-in for exploitability; the heuristic score below is the primary signal. A supervised version — fine-tuned on whether a gadget contributed to a working chain — is the intended direction.
 
 **Model Architecture:**
 - Base: `microsoft/codebert-base` (768-dimensional embeddings)
@@ -360,12 +362,14 @@ python3.11 roperation.py --binary target.bin --ml-rank
 
 ---
 
-### 5. SMT Chain Synthesis
+### 5. Heuristic Chain Synthesis (Experimental)
 
-**Objective**: Automatically generate exploit chains for specific attack goals
+> **Status / honesty note:** Despite the internal function name `synthesize_chain_z3`, there is **no Z3/SMT solving in the current path**. This is a greedy search that selects the first gadget controlling each syscall-argument register. It does **not** model stack layout, propagate bad bytes across the chain, or account for a gadget clobbering a register set by a prior gadget. For production chains, use a constraint-solving builder such as angrop. A real SMT backend (encoding each gadget's register/memory effects as a transfer relation and solving for a valid ordering under bad-byte and clobber constraints) is the planned direction.
+
+**Objective**: Assemble a candidate register-setup sequence for a simple attack goal
 
 **Currently Implemented:**
-- Target: `execve("/bin/sh", 0, 0)` system call
+- Target: `execve("/bin/sh", 0, 0)` system call, x86-64 only, greedy first-match (not constraint-solved)
 
 **Synthesis Algorithm:**
 
@@ -499,7 +503,9 @@ For each instruction I in disassembly:
 | COOP | call [vtable+offset] | Object-oriented dispatch |
 | DOP | mov/str/ldr with memory operands | Data manipulation |
 
-### Neural Clustering
+### Clustering (TF-IDF + DBSCAN)
+
+> Note: this is classical ML (TF-IDF features + density clustering), not a neural method.
 
 **Algorithm**: DBSCAN (Density-Based Spatial Clustering of Applications with Noise)
 
@@ -524,7 +530,9 @@ For each instruction I in disassembly:
 - Reduces redundancy in exploit chains
 - Enables semantic deduplication
 
-### Symbolic Validation
+### CFG Liveness Signal (angr)
+
+> **Status / honesty note:** This does **not** prove per-gadget reachability. It builds a `CFGFast` and returns the CFG node count as a coarse liveness/analyzability signal. It does not verify that individual gadget addresses lie on reachable paths, and the taint-to-syscall-argument flow described below is **planned, not implemented**. True validation would check gadget addresses against CFG nodes and use symbolic execution to prove reachability under the chain's register/memory preconditions.
 
 **Engine**: angr symbolic execution framework
 
@@ -542,7 +550,7 @@ For each instruction I in disassembly:
    ## Count CFG nodes
    ## Validate gadget addresses are in CFG
 
-4. Taint Tracking (Optional)
+4. Taint Tracking (Planned — not implemented)
    ## Mark attacker-controlled memory regions
    ## Trace data flow to syscall arguments
    ## Identify DOP gadgets
@@ -561,16 +569,16 @@ For each instruction I in disassembly:
 
 | Architecture | Capstone Constant | ELF e_machine | Status |
 |--------------|-------------------|---------------|--------|
-| **x86** | CS_ARCH_X86 + CS_MODE_32 | 0x03 | ??? Tested |
-| **x86-64** | CS_ARCH_X86 + CS_MODE_64 | 0x3E | ??? Tested |
-| **ARM** | CS_ARCH_ARM + CS_MODE_ARM | 0x28 | ??? Supported |
-| **ARM64** | CS_ARCH_ARM64 + CS_MODE_ARM | 0xB7 | ??? Supported |
-| **MIPS** | CS_ARCH_MIPS + MIPS32 + BIG_ENDIAN | 0x08 | ??? Supported |
-| **MIPS64** | CS_ARCH_MIPS + MIPS64 + BIG_ENDIAN | 0x08 | ??? Supported |
-| **PowerPC** | CS_ARCH_PPC + MODE_32 + BIG_ENDIAN | 0x14 | ??? Supported |
-| **PowerPC64** | CS_ARCH_PPC + MODE_64 + BIG_ENDIAN | 0x15 | ??? Supported |
-| **RISC-V 32** | CS_ARCH_RISCV + RISCV32 | 0xF3 | ??? Supported |
-| **RISC-V 64** | CS_ARCH_RISCV + RISCV64 | 0xF3 | ??? Supported |
+| **x86** | CS_ARCH_X86 + CS_MODE_32 | 0x03 | Tested |
+| **x86-64** | CS_ARCH_X86 + CS_MODE_64 | 0x3E | Tested |
+| **ARM** | CS_ARCH_ARM + CS_MODE_ARM | 0x28 | Supported (classic ISA) |
+| **ARM64** | CS_ARCH_ARM64 + CS_MODE_ARM | 0xB7 | Experimental — no PAC/BTI modeling |
+| **MIPS** | CS_ARCH_MIPS + MIPS32 + BIG_ENDIAN | 0x08 | Supported (classic ISA) |
+| **MIPS64** | CS_ARCH_MIPS + MIPS64 + BIG_ENDIAN | 0x08 | Supported (classic ISA) |
+| **PowerPC** | CS_ARCH_PPC + MODE_32 + BIG_ENDIAN | 0x14 | Supported (classic ISA) |
+| **PowerPC64** | CS_ARCH_PPC + MODE_64 + BIG_ENDIAN | 0x15 | Supported (classic ISA) |
+| **RISC-V 32** | CS_ARCH_RISCV + RISCV32 | 0xF3 | Supported (classic ISA) |
+| **RISC-V 64** | CS_ARCH_RISCV + RISCV64 | 0xF3 | Supported (classic ISA) |
 
 ### Architecture-Specific Gadget Patterns
 
@@ -939,7 +947,7 @@ If you use ROPeration in academic research, please cite:
   year={2025},
   month={October},
   version={2.0.0},
-  note={Multi-architecture framework for ROP/JOP/COOP/DOP discovery with ML ranking and SMT synthesis},
+  note={Multi-architecture framework for ROP/JOP/COOP/DOP gadget discovery, heuristic triage, and experimental chain synthesis},
   url={https://github.com/packetmaven/roperation}
 }
 ```
@@ -1013,8 +1021,8 @@ black roperation.py --check
 
 **v2.0.0 (October 14, 2025):**
 - ??? Added 7 new architectures (MIPS, PowerPC, RISC-V)
-- ??? Implemented CodeBERT ML ranking
-- ??? Added SMT-based chain synthesis
+- ??? Added experimental CodeBERT embedding-based scoring (untrained complexity proxy)
+- ??? Added experimental heuristic chain synthesis (greedy; SMT/Z3 backend planned)
 - ??? YARA rule auto-generation
 - ??? Enhanced heuristic scoring (12 criteria)
 - ??? Constraint-based filtering
