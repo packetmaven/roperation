@@ -137,12 +137,12 @@ pip install torch>=2.0.0
 pip install transformers>=4.30.0
 ```
 
-**Symbolic Validation (Optional):**
+**angr CFG liveness signal (Optional):**
 ```bash
 pip install angr>=9.2.0
 ```
 
-**SMT Synthesis (Optional):**
+**Z3 (Optional — reserved for planned SMT synthesis backend; not used by the current heuristic synthesizer):**
 ```bash
 pip install z3-solver>=4.12.0
 ```
@@ -544,21 +544,22 @@ For each instruction I in disassembly:
 
 2. CFG Generation
    ## CFGFast analysis (fast, approximation-based)
-   ## Identifies reachable code blocks
 
-3. Reachability Analysis
-   ## Count CFG nodes
+3. Liveness Signal (implemented)
+   ## Count CFG nodes -> coarse analyzability signal
+
+4. Reachability Analysis (Planned — not implemented)
    ## Validate gadget addresses are in CFG
 
-4. Taint Tracking (Planned — not implemented)
+5. Taint Tracking (Planned — not implemented)
    ## Mark attacker-controlled memory regions
    ## Trace data flow to syscall arguments
    ## Identify DOP gadgets
 ```
 
 **Purpose:**
-- Validate gadgets are truly reachable
-- Eliminate dead code false positives
+- Provide a coarse binary-analyzability signal (CFG node count)
+- Per-gadget reachability validation and dead-code elimination are planned, not yet implemented
 - Provide confidence metrics
 
 ---
@@ -626,7 +627,7 @@ required arguments:
 
 optional arguments:
   -h, --help            show this help message and exit
-  --ml-rank             Enable CodeBERT-based ML ranking (requires transformers)
+  --ml-rank             Enable experimental CodeBERT embedding-based scoring (untrained proxy; requires transformers)
   --synthesize-chain {execve}
                         Synthesize ROP chain for target (e.g., execve)
   --required-regs [REQUIRED_REGS ...]
